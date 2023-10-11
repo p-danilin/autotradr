@@ -1,60 +1,43 @@
-# backtester/backtester.py
-import pandas as pd
+import datetime
+from data.data_manager import fetch_data
+from strategies.mean_reversion_strategy import TestStrategy
+import backtrader as bt
 
 class Backtester:
-    def __init__(self, strategy, initial_capital=100000):
-        self.strategy = strategy
-        self.initial_capital = initial_capital
-        self.cash = initial_capital
-        self.position = 0
-        self.last_price = 0
-        self.portfolio_value = initial_capital
-        self.transactions = []
+    def __init__(self, start_date, end_date, tickers):
+        self.start_date = start_date
+        self.end_date = end_date
+        self.tickers = tickers
 
-    def run(self, data, transaction_cost=0.0): 
-        if 'price' not in data.columns or 'positions' not in data.columns:
-            raise ValueError("Data must contain 'price' and 'positions' columns.")
-        
-        for index, row in data.iterrows():
-            position = row.get('positions', 0)
-            # print(f"Date: {index}, Position: {position}, Short Avg: {row.get('short_mavg', 'N/A')}, Long Avg: {row.get('long_mavg', 'N/A')}")
-            # Buy logic
-            if position == 1:
-                shares_to_buy = self.cash // row['price']
-                if shares_to_buy > 0:
-                    cost = shares_to_buy * row['price'] * (1 + transaction_cost)
-                    self.position += shares_to_buy
-                    self.cash -= cost
-                    self.transactions.append({
-                        'Date': str(index), 
-                        'Type': 'BUY',
-                        'Price': row['price'],
-                        'Shares': shares_to_buy
-                    })
-            # Sell logic
-            elif position == -1 and self.position > 0:
-                revenue = self.position * row['price'] * (1 - transaction_cost)
-                self.cash += revenue
-                self.transactions.append({
-                    'Date': str(index),
-                    'Type': 'SELL',
-                    'Price': row['price'],
-                    'Shares': self.position
-                })
-                self.position = 0
+    def run(self):
+        class PandasData(bt.feeds.PandasData):
+            pass
 
-            # Update portfolio value
-            self.last_price = row['price']
-            self.portfolio_value = self.cash + self.position * row['price']
+        for ticker in self.tickers:
+            print("Running for ticker:", ticker)
 
-    def get_results(self):
-        # Calculate performance metrics and return results
-        total_return = (self.portfolio_value - self.initial_capital) / self.initial_capital
-        return {
-            'Total Return': total_return,
-            'Transactions': self.transactions,
-            'Final Portfolio Value': self.cash + self.position * (self.last_price if self.position != 0 else 1),
-            'Final Cash': self.cash,
-            'Final Position': self.position
-        }
+            cerebro = bt.Cerebro()
 
+            cerebro.addstrategy(TestStrategy)
+
+            df = fetch_data(ticker, self.start_date, self.end_date)
+
+            data = PandasData(dataname=df, 
+                              fromdate=self.start_date,
+                              todate=self.end_date)
+
+            cerebro.adddata(data)
+
+            cerebro.broker.setcash(100000.0)
+
+            cerebro.addsizer(bt.sizers.FixedSize, stake=10)
+
+            cerebro.broker.setcommission(commission=0.0)
+
+            print('Starting Portfolio Value for %s: %.2f' % (ticker, cerebro.broker.getvalue()))
+
+            cerebro.run()
+
+            print('Final Portfolio Value for %s: %.2f' % (ticker, cerebro.broker.getvalue()))
+
+            cerebro.plot()
